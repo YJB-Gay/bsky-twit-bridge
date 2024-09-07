@@ -10,5 +10,11 @@
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@atproto/api": "^0.13.6",
+    "dotenv": "^16.4.5",
+    "node-html-parser": "^6.1.13",
+    "rss-parser": "^3.13.0"
   }
 }
