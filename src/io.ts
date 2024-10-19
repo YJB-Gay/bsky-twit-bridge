@@ -1,16 +1,22 @@
-import fs from 'fs/promises'
+import fs from 'fs'
 import * as config from "./config.json"
 import type { Post } from './post'
+import { promisify } from 'util' 
 
-async function getPosts() {
-    await fs.readFile(config.datafile).then(data => {
-        const posts: Post[] = JSON.parse(data.toString()).posts
+const readFile = promisify(fs.readFile)
+const writeFile = promisify(fs.writeFile)
+
+export async function getPosts(): Promise<Post[]> {
+    try {
+        const data = await readFile(config.datafile)
+        const posts: Post[] = JSON.parse(data.toString())
         return posts
-    }).catch(err => {
+    } catch (err) {
+        console.error("Error when reading the file!")
         return []
-    })
+    }
 }
 
-async function writePosts(posts: Post[]) {
-    await fs.writeFile(config.datafile, JSON.stringify(posts))
+export async function writePosts(posts: Post[]) {
+    await writeFile(config.datafile, JSON.stringify(posts))
 }

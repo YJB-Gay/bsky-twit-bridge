@@ -1,4 +1,5 @@
 export interface Post {
     description: string,
-    image?: string
+    guid: string,
+    images?: string[]
 }

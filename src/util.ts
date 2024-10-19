@@ -3,10 +3,20 @@ import HTMLParser from "node-html-parser"
 export function parseDescription(description: string) {
     const descElem = HTMLParser.parse(description)
     const imageElems = descElem.getElementsByTagName('img')
+    const links = descElem.getElementsByTagName('a')
 
-    const desc = descElem.getElementsByTagName('p')[0].removeChild(imageElems[0]).innerHTML
+    const images = []
+
+    let desc = descElem.getElementsByTagName('p')[0].innerHTML
         .replaceAll('<br>', '\n')
-    const img = imageElems[0].attributes['src']
+    
+    for (const link of links) {
+        desc = desc.replaceAll(link.outerHTML, link.innerText)
+    }
+    for (const image of imageElems) {
+        desc = desc.replaceAll(image.outerHTML, '')
+        images.push(image.attributes['src'])
+    }
 
-    return { desc, img }
+    return { desc, images }
 }
