@@ -1,12 +1,20 @@
 # bsky-twit-bridge
 
-To install dependencies:
+## To install dependencies:
 
 ```bash
 bun install
 ```
 
-To run:
+## To setup program
+
+Create a new file called .env in the root folder with the contents
+```txt
+BSKY_USERNAME="your username"
+BSKY_PASSWORD="your password"
+```
+
+## To run:
 
 ```bash
 bun run index.ts
