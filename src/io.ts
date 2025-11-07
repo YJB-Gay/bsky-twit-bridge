@@ -1,22 +1,25 @@
 import fs from 'fs'
-import * as config from "./config.json"
 import type { Post } from './post'
-import { promisify } from 'util' 
+import { promisify } from 'util'
+import * as dotenv from 'dotenv'
+
+dotenv.config()
 
 const readFile = promisify(fs.readFile)
 const writeFile = promisify(fs.writeFile)
 
+const DATA_FILE = process.env.DATA_FILE || './posts.json'
+
 export async function getPosts(): Promise<Post[]> {
     try {
-        const data = await readFile(config.datafile)
+        const data = await readFile(DATA_FILE)
         const posts: Post[] = JSON.parse(data.toString())
         return posts
     } catch (err) {
-        console.error("Error when reading the file!")
         return []
     }
 }
 
 export async function writePosts(posts: Post[]) {
-    await writeFile(config.datafile, JSON.stringify(posts))
+    await writeFile(DATA_FILE, JSON.stringify(posts))
 }

@@ -1,5 +1,5 @@
 export interface Post {
     description: string,
     guid: string,
-    images?: string[]
+    media?: Array<{ type: string, url: string }>
 }

@@ -3,19 +3,21 @@
   "module": "src/index.ts",
   "type": "module",
   "scripts": {
-    "start": "bun run src/index.ts"
+    "start": "bun run src/index.ts",
+    "dev": "bun run src/index.ts"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/node": "^20.0.0"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
   },
   "dependencies": {
     "@atproto/api": "^0.13.6",
-    "axios": "^1.7.7",
+    "@types/fluent-ffmpeg": "^2.1.28",
+    "axios": "^1.13.2",
     "dotenv": "^16.4.5",
-    "node-html-parser": "^6.1.13",
-    "rss-parser": "^3.13.0"
+    "fluent-ffmpeg": "^2.1.3"
   }
 }

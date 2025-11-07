@@ -1,95 +1,207 @@
 import { BskyAgent } from "@atproto/api"
 import * as dotenv from "dotenv"
-import Parser from "rss-parser"
-import { parseDescription } from "./util"
+import { buildRichText } from "./util"
 import * as io from "./io"
 import type { Post } from "./post"
 import axios from 'axios'
-
-import * as config from "./config.json"
+import { getUserTweets } from "./twitter"
+import { compressVideo } from "./video"
+import * as fs from 'fs'
 
 dotenv.config()
 
-type CustomFeed = { title: string }
-type CustomItem = { description: string }
+if (!fs.existsSync('./temp')) fs.mkdirSync('./temp')
 
-const parser: Parser<CustomFeed, CustomItem> = new Parser({
-    customFields: {
-        feed: ['title'],
-        item: ['description']
-    }
-})
+const BSKY_USERNAME = process.env.BSKY_USERNAME!
+const BSKY_PASSWORD = process.env.BSKY_PASSWORD!
+const TWITTER_USER = process.env.TWITTER_USER!
+const CHECK_INTERVAL = parseInt(process.env.CHECK_INTERVAL || '60000')
+
+if (!BSKY_USERNAME || !BSKY_PASSWORD || !TWITTER_USER) {
+    console.error('missing env vars')
+    process.exit(1)
+}
 
 const agent = new BskyAgent({
     service: 'https://bsky.social'
 })
 
-await agent.login({ identifier: process.env.BSKY_USERNAME!, password: process.env.BSKY_PASSWORD! })
+await agent.login({ identifier: BSKY_USERNAME, password: BSKY_PASSWORD })
 
 async function checkNewPosts() {
     const savedPosts = await io.getPosts()
-
-    const feed = await parser.parseURL(`https://nitter.privacydev.net/${config.user}/rss`)
-    const latestPost = feed.items[0]
-
-    if (savedPosts && savedPosts.length > 0) {
-        const latestSavedPost = savedPosts[savedPosts.length - 1]
-
-        if (latestSavedPost.guid == latestPost.guid?.split('/')[5]) {
-            console.log("No new posts!")
-            return
+    
+    try {
+        const tweets = await getUserTweets(TWITTER_USER, 5)
+        if (!tweets || tweets.length === 0) return
+        
+        const latestTweet = tweets[0]
+        
+        if (savedPosts && savedPosts.length > 0) {
+            const latestSavedPost = savedPosts[savedPosts.length - 1]
+            if (latestSavedPost.guid === latestTweet.id) {
+                console.log("no new posts")
+                return
+            }
         }
+        
+        const media = latestTweet.media.map(m => ({
+            type: m.type === 'video' ? 'video' as const : 'photo' as const,
+            url: m.url
+        }))
+        
+        let text = latestTweet.text.replace(/https:\/\/t\.co\/\w+/g, '').trim()
+        const newPost = { 
+            description: text, 
+            guid: latestTweet.id, 
+            media 
+        }
+        
+        await pushPost(newPost)
+        savedPosts.push(newPost)
+        await io.writePosts(savedPosts)
+    } catch (error) {
+        console.error('error checking tweets:', error)
     }
-
-    const desc = parseDescription(latestPost.description)
-    const newPost = { description: desc.desc, guid: latestPost.guid?.split('/')[5]!, images: desc.images }
-    await pushPost(newPost)
-    savedPosts.push(newPost)
-    await io.writePosts(savedPosts)
 }
 
-async function fetchImageAsUint8Array(url: string) {
-    const response = await axios.get(url, {
-        responseType: 'arraybuffer',
-        headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36' // Mimic a real browser
+async function fetchImageAsUint8Array(url: string): Promise<[Uint8Array, string] | null> {
+    try {
+        const response = await axios.get(url, {
+            responseType: 'arraybuffer',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            },
+            timeout: 30000
+        })
+        const contentType = response.headers["content-type"]?.toString() || ''
+        if (!contentType.startsWith('image/') && !contentType.startsWith('video/')) {
+            return null
         }
-    });
-    return [new Uint8Array(response.data), response.headers["Content-Type"]?.toString()];
+        return [new Uint8Array(response.data), contentType]
+    } catch (error) {
+        return null
+    }
 }
 
 async function pushPost(post: Post) {
-    console.log('NEW POST')
-    console.log(`${post.description}\n${post.guid}\n${post.images?.join('\n')}`)
 
-    let images = []
-    if (post.images) {    
-        for (const image of post.images!) {
-            const [imageArray, encoding] = await fetchImageAsUint8Array(image);
 
-            const { data } = await agent.uploadBlob(imageArray as Uint8Array, {
-                encoding: encoding as string,
-            });
+    const images = []
+    let videoEmbed = null
 
-            images.push(
-                {
-                    alt: '',
-                    image: data.blob,
+    if (post.media) {
+        const firstVideo = post.media.find(m => m.type === 'video')
+        if (firstVideo) {
+            try {
+                const videoPath = `./temp/${post.guid}.mp4`
+                await compressVideo(firstVideo.url, videoPath)
+                const videoData = fs.readFileSync(videoPath)
+                const videoSize = videoData.length
+                const didDoc = await agent.com.atproto.identity.resolveHandle({ handle: agent.session?.handle || '' })
+                const userDid = didDoc.data.did
+                const didDocResponse = await fetch(`https://plc.directory/${userDid}`)
+                const didDocData = await didDocResponse.json() as any
+                const pdsEndpoint = didDocData.service?.find((s: any) => s.id === '#atproto_pds')?.serviceEndpoint
+                const pdsHost = new URL(pdsEndpoint).host
+                const serviceAuth = await agent.com.atproto.server.getServiceAuth({
+                    aud: `did:web:${pdsHost}`,
+                    lxm: 'com.atproto.repo.uploadBlob',
+                    exp: Math.floor(Date.now() / 1000) + 60 * 30,
+                })
+                const uploadUrl = new URL('https://video.bsky.app/xrpc/app.bsky.video.uploadVideo')
+                uploadUrl.searchParams.append('did', agent.session?.did || '')
+                uploadUrl.searchParams.append('name', `${post.guid}.mp4`)
+                const uploadResponse = await fetch(uploadUrl.toString(), {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${serviceAuth.data.token}`,
+                        'Content-Type': 'video/mp4',
+                        'Content-Length': videoSize.toString()
+                    },
+                    body: new Uint8Array(videoData)
+                })
+                if (!uploadResponse.ok) {
+                    const errorText = await uploadResponse.text()
+                    throw new Error(`Video upload failed: ${uploadResponse.status}`)
                 }
-            )
+                const jobStatus = await uploadResponse.json() as any
+                let blob = jobStatus.blob
+                let attempts = 0
+                const maxAttempts = 60
+                while (!blob && attempts < maxAttempts) {
+                    await new Promise(resolve => setTimeout(resolve, 1000))
+                    attempts++
+                    const statusResponse = await fetch(
+                        `https://video.bsky.app/xrpc/app.bsky.video.getJobStatus?jobId=${jobStatus.jobId}`,
+                        {
+                            headers: {
+                                'Authorization': `Bearer ${serviceAuth.data.token}`
+                            }
+                        }
+                    )
+                    const status = await statusResponse.json() as any
+                    if (status.jobStatus?.blob) {
+                        blob = status.jobStatus.blob
+                    }
+                    if (status.jobStatus?.state === 'JOB_STATE_FAILED') {
+                        throw new Error('Video processing failed')
+                    }
+                }
+                if (!blob) {
+                    throw new Error('Video processing timed out')
+                }
+                videoEmbed = {
+                    $type: 'app.bsky.embed.video',
+                    video: blob,
+                    alt: post.description.slice(0, 1000)
+                }
+                try { fs.unlinkSync(videoPath); } catch {}
+            } catch (error) {
+                // video upload failed
+            }
+        } else {
+            for (const item of post.media) {
+                if (images.length >= 4) break
+                try {
+                    if (item.type === 'photo') {
+                        const result = await fetchImageAsUint8Array(item.url)
+                        if (result) {
+                            const [imageArray, encoding] = result
+                            const { data } = await agent.uploadBlob(imageArray, { encoding })
+                            images.push({ 
+                                alt: '', 
+                                image: data.blob
+                            })
+                        }
+                    }
+                } catch (error) {
+                    // image upload failed
+                }
+            }
         }
     }
 
-    await agent.post({
-        text: `${post.description}`,
-        embed: {
+    const rt = await buildRichText(post.description, agent)
+
+    let embed = undefined
+    if (videoEmbed) {
+        embed = videoEmbed
+    } else if (images.length > 0) {
+        embed = {
             $type: 'app.bsky.embed.images',
             images: images
-        },
+        }
+    }
+    
+    const postResult = await agent.post({
+        text: rt.text,
+        facets: rt.facets,
+        embed,
         createdAt: new Date().toISOString()
     })
+    
+
 }
 
-setInterval(
-    checkNewPosts
-, 10000)
+setInterval(checkNewPosts, CHECK_INTERVAL)

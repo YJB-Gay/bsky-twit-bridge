@@ -1,25 +1,14 @@
 # bsky-twit-bridge
 
-## To install dependencies:
+A simple bot to crosspost tweets to Bluesky with images and video support.
 
-```bash
-bun install
-```
+## install
 
-## To setup program
+- bun install
+- pip install twikit
+- get your Twitter cookies (ct0, auth_token) and put them in cookies.json
+- copy .env.example to .env and fill in your info
 
-Create a new file called .env in the root folder with the contents
-```txt
-BSKY_USERNAME="your username"
-BSKY_PASSWORD="your password"
-```
+## run
 
-## To run:
-
-```bash
-bun run index.ts
-```
-
-This project was created using `bun init` in bun v1.1.10. [Bun](https://bun.sh) is a fast all-in-one JavaScript runtime.
-
-Made with love by [YJB](https://discord.com/users/132057503071600640), [SeththeDev](https://femboys.rent/), and [thetoastedpotato](https://catboys.zip)
+bun run src/index.ts
